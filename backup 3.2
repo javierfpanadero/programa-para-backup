@@ -1,0 +1,95 @@
+@echo off
+setlocal enabledelayedexpansion
+
+set "nombre_pendrive_trabajo=MiPendriveTrabajo"
+set "carpeta_backups=C:\Users\profesor\Desktop\Backup CURSO 24-25"
+set "nombre_pendrive_backup=MiPendriveBackup"
+set "max_copias=8"
+
+rem Obtener fecha y hora actual con formato personalizado
+for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set datetime=%%I
+set "mes=%datetime:~4,2%"
+set "dia=%datetime:~6,2%"
+set "año=%datetime:~0,4%"
+set "hora=%datetime:~8,2%"
+set "minuto=%datetime:~10,2%"
+set "segundo=%datetime:~12,2%"
+
+set "timestamp=copia_%dia%_%mes%_%año%_%hora%_%minuto%_%segundo%"
+
+rem Buscar la letra de unidad del pendrive de trabajo por su nombre
+for /f "tokens=2 delims==" %%D in ('wmic volume where "label='%nombre_pendrive_trabajo%'" get driveletter /value 2^>nul') do set "pendrive_trabajo_letra=%%D"
+
+if not defined pendrive_trabajo_letra (
+    echo No se encontró el pendrive de trabajo con el nombre %nombre_pendrive_trabajo%. Abortando el script.
+    exit /b
+) else (
+    set "carpeta_trabajo=%pendrive_trabajo_letra%\CURSO 24-25"
+)
+
+rem Buscar la letra de unidad del pendrive de backups por su nombre
+for /f "tokens=2 delims==" %%D in ('wmic volume where "label='%nombre_pendrive_backup%'" get driveletter /value 2^>nul') do set "pendrive_backup_letra=%%D"
+
+if not defined pendrive_backup_letra (
+    echo No se encontró el pendrive de backup con el nombre %nombre_pendrive_backup%. Se realiza la copia solo en el disco duro.
+) else (
+    set "pendrive_backups=%pendrive_backup_letra%\Backups"
+)
+
+rem Crear nueva carpeta de backup en el disco local
+set "nuevo_backup=%carpeta_backups%\%timestamp%"
+mkdir "%nuevo_backup%"
+
+rem Copiar archivos de la carpeta de trabajo al nuevo backup local
+robocopy "%carpeta_trabajo%" "%nuevo_backup%" /E /XA:SH /XJ /R:1 /W:1 /V
+
+rem Verificar si hay suficiente espacio en el pendrive de backup antes de copiar
+if defined pendrive_backup_letra (
+    rem Obtener el tamaño total de la carpeta de trabajo
+    for /f "tokens=3" %%A in ('dir /s /a /-c "%carpeta_trabajo%" ^| find "bytes"') do set tamaño_trabajo=%%A
+
+    rem Obtener el espacio libre en el pendrive de backup
+    for /f "tokens=3" %%B in ('wmic logicaldisk where "DeviceID='%pendrive_backup_letra%'" get freespace /value') do set espacio_libre=%%B
+
+    rem Comparar el tamaño del trabajo con el espacio libre en el pendrive de backup
+    if !tamaño_trabajo! lss !espacio_libre! (
+        rem Crear nueva carpeta de backup en el pendrive
+        mkdir "%pendrive_backups%\%timestamp%"
+
+        rem Copiar archivos de la carpeta de trabajo al nuevo backup en el pendrive
+        robocopy "%carpeta_trabajo%" "%pendrive_backups%\%timestamp%" /E /XA:SH /XJ /R:1 /W:1 /V
+        set "pendrive_copia_realizada=1"
+    ) else (
+        echo No hay suficiente espacio en el pendrive de backup para realizar la copia.
+    )
+)
+
+echo Copia de seguridad completada:
+echo - Local: %nuevo_backup%
+if defined pendrive_copia_realizada (
+    echo - Pendrive: %pendrive_backups%\%timestamp%
+) else (
+    echo - No se realiza copia en el pendrive.
+)
+
+rem Eliminar copias antiguas si se excede el número máximo
+pushd "%carpeta_backups%"
+for /f "skip=%max_copias% delims=" %%F in ('dir /b /o-d "copia_*"') do (
+    rd /s /q "%%F"
+    echo Eliminada copia antigua: %%F
+)
+popd
+
+if defined pendrive_copia_realizada (
+    pushd "%pendrive_backups%"
+    for /f "skip=%max_copias% delims=" %%F in ('dir /b /o-d "copia_*"') do (
+        rd /s /q "%%F"
+        echo Eliminada copia antigua del pendrive: %%F
+    )
+    popd
+)
+
+echo.
+echo Se han mantenido las %max_copias% copias recientes.
+
+pause
